@@ -6,10 +6,15 @@ output: html_document
 ---
 
   **Aim(s):** 1) To examine the between-virus differences in metabolomie profiles; 2) their biologic interpretation. Prediction of RSV vs. RV is not the goal.
+  
   **Patients:** 116 patients (excluding RSV-RV coinfection)
+  
   **Exposure:** RSV-only vs. RV-only
+  
   **Outcomes:** Serum metabolites (708)
+  
   **Confounders:** Age, sex. 
+  
   **Analysis:** 1) linear regression (after log-transformation) adjsuting for cnofounder(s) with FDR correction, 2) pathway analysis?
 
 
@@ -18,7 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## 1. Upload packages
-```{r}
+```{r warning=FALSE}
 library("tidyverse")
 library("readstata13")
 library("broom")
@@ -50,72 +55,58 @@ head(df_merged)
 ```
 
 ## 4. Prep for regression
-```{r}
-# Set refelence level
+```{r eval=FALSE}
+# Set refelence level -- unlikely to be needed
 #df_merged$Virus_Combined <- as_factor(df_merged$Virus_Combined)  # Change to factor
 #df_merged$Virus_Combined <- relevel(df_merged$Virus_Combined, "Rvonly") 
 
 ```
 
 ## 5. Unadjusted regression
-```{r TRIAL -- to be deleted}
-fit3<- lm(df_merged[[3]] ~Virus_Combined,
-         data=df_merged)
-tidy(fit3)
-summary(fit3)$coefficients[2,4]
-
-fit4<- lm(df_merged[[4]] ~Virus_Combined,
-         data=df_merged)
-tidy(fit4)
-summary(fit4)$coefficients[2,4]
-```
 ```{r}
-# Develop a function to run unadjusted model
-lm_function <- function(y) lm(y ~ Virus_Combined, 
-                           data = df_merged)
+# Develop a function to run UNadjusted model
+lm_unadj_function <- function(y) lm(y ~ Virus_Combined, 
+                                    data = df_merged)
 # Apply the function to each column
-lapply (df_merged[,3:6], lm_function)
-map_dfr(df_merged[,3:6], function(x) summary(lm_function(x)) %>% glance()) 
-df_ouput_unadjusted <- map_dfr(df_merged[,3:6], function(x) summary(lm_function(x)) %>% 
-          tidy()) %>% 
-          filter(term == "Virus_CombinedRvonly")
+#lapply (df_merged[,3:710], lm_unadj_function)
 
-rownames(ouput_unadjusted) <-colnames(df_merged[3:6])
+# Apply the function to the metabolites, and get FDR 
+df_output_unadjusted <- map_dfr(df_merged[,3:710], 
+                                function(x) summary(lm_unadj_function(x)) %>% 
+          broom::tidy(conf.int=TRUE)) %>%
+          filter(term == "Virus_CombinedRvonly")%>%   # Get outputs for the virus only (not intercepts or covariates)
+          select(-c(term, std.error, statistic)) %>%  # Remove unnecessary variables
+          mutate(metabolite <- colnames(df_merged[3:710])) %>% # Add names of metabolites
+          mutate(fdr_p = p.adjust(p.value, "fdr")) %>% # Compute FDR
+          filter(fdr_p < 0.05)   # Get only FDR <0.05
+
+dim(df_output_unadjusted)  # 122 metabolites are significant
+write_csv(df_output_unadjusted, "./output_unadjusted_fdr.csv")
 ```
 
 
-
+## 6. Adjusted regression (age and sex)
 ```{r}
-number_metabolites <- 2
+# Develop a function to run Adjusted model
+lm_adj_function <- function(y) lm(y ~ Virus_Combined + Age_mo + intake_sex, # Adjusted for age and sex
+                                    data = df_merged)
 
-# placeholders
-coef_lm    <- numeric(number_metabolites)
-se_lm      <- numeric(number_metabolites)
-p.value_lm <- numeric(number_metabolites)
+# Apply the function to the metabolites, and get FDR 
+df_output_adjusted <- map_dfr(df_merged[,3:710], 
+                                function(x) summary(lm_adj_function(x)) %>% 
+          broom::tidy(conf.int=TRUE)) %>%
+          filter(term == "Virus_CombinedRvonly")%>%   # Get outputs for the virus only (not intercepts or covariates)
+          select(-c(term, std.error, statistic)) %>%  # Remove unnecessary variables
+          mutate(metabolite <- colnames(df_merged[3:710])) %>% # Add names of metabolites
+          mutate(fdr_p = p.adjust(p.value, "fdr")) %>% # Compute FDR
+          filter(fdr_p < 0.05)   # Get only FDR <0.05
 
-View(head(df_merged))
+dim(df_output_adjusted)  # 108 metabolites are significant
+write_csv(df_output_adjusted, "output_adjusted_fdr.csv")
 
-# for loop
-for (i in seq_along(colnames(df_merged)[3:4])){
-    fit <- lm(df_merged[[i]] ~ Virus_Combined,
-              data=df_merged)  
-    coef_lm[i]    <- summary(fit)$coefficients[2,1]  # Summary of 2nd row + 1st column = coef 
-    se_lm[i]      <- summary(fit)$coefficients[2,2]  # Summary of 2nd row + 1st column = se 
-    p.value_lm[i] <- summary(fit)$coefficients[2,4]  # Summary of 2nd row + 1st column = p-value 
-}
-    
-    
-output_lm <- cbind(colnames(df_merged)[3:4], 
-                   coef_lm, se_lm, p.value_lm) %>% tbl_df()
-output_lm$coef_lm    <- as.numeric(output_lm$coef_lm) %>% round (., digits =2)
-output_lm$se_lm      <- as.numeric(output_lm$se_lm)   %>% round (., digits =2)
-output_lm$p.value_lm <- as.numeric(output_lm$p.value_lm)
-output_lm$fdr_p <- as.numeric(output_lm$p.value_lm)   %>% p.adjust(., "fdr") %>% round(., digits=4)
-output_lm$p.value_lm <- output_lm$p.value_lm %>% round(., digits=4)
-output_lm; 
-
-  output_lm %>% filter(., fdr_p <0.05) 
-    
 ```
+
+
+
 
 
