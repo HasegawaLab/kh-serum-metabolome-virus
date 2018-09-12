@@ -83,17 +83,24 @@ df_output_unadjusted <- map_dfr(df_merged[,3:710],
 dim(df_output_unadjusted)  # 122 metabolites are significant
 write_csv(df_output_unadjusted, "./output_unadjusted_fdr.csv")
 ```
+```{r}
+colnames(df_metadata)
+summary(df_metadata$corticosteroids_pre_, useNA="ifany")
++ premature37 + corticosteroids_pre #+ CPAPintubate
+```
 
 
-## 6. Adjusted regression (age and sex)
+## 6. Adjusted regression 
 ```{r}
 # Develop a function to run Adjusted model
-lm_adj_function <- function(y) lm(y ~ Virus_Combined + Age_mo + intake_sex, # Adjusted for age and sex
-                                    data = df_merged)
+lm_adj_function <- function(y) lm(y ~ Virus_Combined
+                                    + Age_mo + intake_sex
+                                    + premature37 + corticosteroids_life #+ CPAPintubate
+                                    , data = df_merged)
 
 # Apply the function to the metabolites, and get FDR 
 df_output_adjusted <- map_dfr(df_merged[,3:710], 
-                                function(x) summary(lm_adj_function(x)) %>% 
+                                function(y) summary( lm_adj_function(y) ) %>% 
           broom::tidy(conf.int=TRUE)) %>%
           filter(term == "Virus_CombinedRvonly")%>%   # Get outputs for the virus only (not intercepts or covariates)
           select(-c(term, std.error, statistic)) %>%  # Remove unnecessary variables
@@ -101,9 +108,41 @@ df_output_adjusted <- map_dfr(df_merged[,3:710],
           mutate(fdr_p = p.adjust(p.value, "fdr")) %>% # Compute FDR
           filter(fdr_p < 0.05)   # Get only FDR <0.05
 
-dim(df_output_adjusted)  # 108 metabolites are significant
+dim(df_output_adjusted)  # 106 metabolites are significant
 write_csv(df_output_adjusted, "output_adjusted_fdr.csv")
+```
 
+
+## Random-effect
+```{r}
+library(lme4)
+library(lmerTest)
+df_merged$site <- as.factor(df_merged$site)
+df_merged$raceethn <- as.factor(df_merged$raceethn)
+
+# place holder
+coef_lm    <- 708
+p.value_lm <- 708
+# For Loop
+for (i in names(df_merged)[3:710]) {
+      fit <- lmer(df_merged[[i]] ~ Virus_Combined
+                            + Age_mo + intake_sex 
+                            + raceethn
+                            + premature37 + corticosteroids_life  #+ CPAPintubate
+                            + (1 | site), 
+                            data = df_merged, REML = FALSE)
+       coef_lm[i]    <- summary(fit)$coefficients[2,1]  # Summary of 2nd row + 1st column = coef 
+       p.value_lm[i] <- summary(fit)$coefficients[2,5]  # Summary of 2nd row + 5th column = p-value 
+    }
+
+
+df_random_output_orig <- cbind(coef_lm, p.value_lm) %>% tbl_df()
+df_random_output <- df_random_output_orig[2:709,] %>%
+          mutate(metabolite <- colnames(df_merged[3:710])) %>% # Add names of metabolites
+          mutate(fdr_p = p.adjust(p.value_lm, "fdr")) %>% # Compute FDR
+          filter(fdr_p < 0.05)   # Get only FDR <0.05
+dim(df_random_output) # 152 metabolites are significant
+write_csv(df_random_output, "output_random_adjusted_fdr.csv")
 ```
 
 
